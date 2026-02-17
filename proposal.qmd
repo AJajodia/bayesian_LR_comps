@@ -1,5 +1,29 @@
 ---
-title: "proposal"
-output: html_document
+title: "Project Proposal"
+format: 
+  revealjs:
+    theme: default
+    reference-location: document
+    scrollable: true
 ---
 
+```{r setup}
+#| echo: false
+library(tidyverse)
+slides_theme <- theme_minimal(base_size = 20)
+theme_set(slides_theme)
+```
+
+## Introduction 
+
+
+## Setup and Plan
+
+
+## Data
+
+
+## Modeling and Methodology
+
+
+## Timeline
