@@ -14,10 +14,22 @@ slides_theme <- theme_minimal(base_size = 20)
 theme_set(slides_theme)
 ```
 
-## Introduction 
+## Introduction/Motivation
+
+- there are so many differing characteristics that go into making a decision (ie. city, suspects, guns in the city, examiner skill level, -type of gun, etc.)
+- We want to do a bayesian model that combines a multitude of factors in order to predict the decision made when presented with a questioned gun and a multitude of factors
+- This specific type of model is called a probit ordinal model as described by Busey et. al
+- https://iupbsapps.shinyapps.io/OrderedProbitDemo/
 
 
 ## Setup and Plan
+- We will be using casings as opposed to bullets (consistent with Guyll)
+- Drew out a lot of factors to evaluate
+- Determining which to use as priors (number of suspects, area the gun was shot, etc)
+- Determining likelihood ratios using the Busey Model:
+- P(E∣Hs​): probability of observing the evidence if the prints are from the same finger
+- P(E∣Hd): probability of observing the evidence if they are from different fingers
+
 
 
 
@@ -33,7 +45,10 @@ theme_set(slides_theme)
 
 
 ## Timeline
-*Week 8:*
-*Week 9:* 
-*Week 10:*
-*Next Term:*
+
+- *Week 8:* Initial simulations and EDA of data
+- *Week 9:* Build out simulation and model
+- *Week 10:* Finish main simulation, start thinking about more complex models/simulations
+- *Early next term:* Finish in-depth models and sims, start shiny app
+- *Middle next term:* Start building poster and report, finish shiny app
+- *Late next term:* Finalize poster and written report
