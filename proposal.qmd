@@ -20,7 +20,13 @@ theme_set(slides_theme)
 ## Setup and Plan
 
 
+
 ## Data
+- We plan to use data from the Monson et al. (2022) cartridge case study
+- Fired cartridge cases were collected from 27 Berettas and 10 non-Berettas (Jimenez)
+- Each comparison set contains one questioned item and two reference items
+- Study used 5-level AFTE conclusions, we will merge inconclusives together and have 3-level AFTE conclusions
+- Throw out unsuitables
 
 
 ## Modeling and Methodology
