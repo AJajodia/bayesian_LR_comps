@@ -33,3 +33,7 @@ theme_set(slides_theme)
 
 
 ## Timeline
+*Week 8:*
+*Week 9:* 
+*Week 10:*
+*Next Term:*
