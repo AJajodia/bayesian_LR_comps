@@ -16,9 +16,9 @@ theme_set(slides_theme)
 
 ## Introduction/Motivation
 
-- there are so many differing characteristics that go into making a decision (ie. city, suspects, guns in the city, examiner skill level, -type of gun, etc.)
-- We want to do a bayesian model that combines a multitude of factors in order to predict the decision made when presented with a questioned gun and a multitude of factors
-- This specific type of model is called a probit ordinal model as described by Busey et. al
+- There are so many differing characteristics that go into making a decision (ie. city, suspects, guns in the city, examiner skill level, -type of gun, etc.)
+- We want to do a Bayesian model that combines a multitude of factors in order to predict the decision made when presented with a questioned gun
+- This specific type of model is called a Ordinal Probit model as described by Busey et. al
 - https://iupbsapps.shinyapps.io/OrderedProbitDemo/
 
 
@@ -37,12 +37,35 @@ theme_set(slides_theme)
 - We plan to use data from the Monson et al. (2022) cartridge case study
 - Fired cartridge cases were collected from 27 Berettas and 10 non-Berettas (Jimenez)
 - Each comparison set contains one questioned item and two reference items
-- Study used 5-level AFTE conclusions, we will merge inconclusives together and have 3-level AFTE conclusions
+- Study used 5-level AFTE conclusions - form our thresholds
 - Throw out unsuitables
 
 
-## Modeling and Methodology
+## Methodology
 
+- We plan to model using an ordinal probit model similar to Busey et. al. 2023
+- Ordinal probit model
+$$
+p(y=k, \mu , \sigma, \{\theta_j\}) = \Phi((\theta_k - \mu)/ \sigma) - \Phi((\theta_{k-1} - \mu)/ \sigma) 
+$$
+- If we treat this like a regression, we can make it into more of a hierarchical model
+
+## Methodology cont.
+![](images/latent.jpg)
+
+## Bayes'
+- We can use priors for different thresholds
+- We can establish different priors depending on city etc.
+- We will end up with a likelihood ratio that we can plug into our Guyll methodology
+
+## Modeling
+- Not going well so far: initial paper uses JAGS, but we want to use Stan
+- A regression (rstanarm or brms) context would make this easier
+- Understanding how our data works with the Busey methodology
+- Thoughts?
+
+## pp_check
+![](images/latent_bar.png)
 
 ## Timeline
 
