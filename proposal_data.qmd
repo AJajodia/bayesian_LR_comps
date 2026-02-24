@@ -20,10 +20,10 @@ clean_data <- data %>% select(ExamID, `Examiner's Analysis`, Gun_1, Gun_Q, M_NM,
     `Examiner's Analysis` = case_when(
       str_detect(`Examiner's Analysis`, "ID") ~ "Identification",
       str_detect(`Examiner's Analysis`, "Elim") ~ "Elimination",
+      .default = `Examiner's Analysis`
     )
   )
 write_csv(clean_data, "clean_data.csv")
-
 stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair) %>%
   mutate(`Examiner's Analysis` = case_when(
     `Examiner's Analysis` == "Inc-A" ~ 4,
