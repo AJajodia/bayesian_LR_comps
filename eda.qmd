@@ -53,6 +53,21 @@ exam_summary <- clean_data %>%
 ```
 
 ```{r}
+# Jitter plot of examiner decisions 
+ggplot(clean_data %>%
+  filter(!examiner_analysis %in% c(
+    "X-Did not provide answer",
+    "Unsuitable-Lack of sufficent marks on QUESTIONED sample",
+     "Unsuitable-Lack of sufficent marks on QUESTIONED and KNOWN samples",
+    "Unsuitable-Lack of sufficent marks on KNOWN samples",
+    "Inc",
+    "Inc-B and Inc-C",
+     "Inc-A and Inc-C"
+  )), aes(x = M_NM, y = examiner_analysis)) +
+  geom_jitter()
+
+
+
 # mated vs nonmated counts
 ggplot(clean_data, aes(x = M_NM)) + 
   geom_bar()
