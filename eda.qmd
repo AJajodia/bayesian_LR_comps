@@ -12,8 +12,10 @@ library(forcats)
 ```
 
 ```{r}
+# Loading in the data
 clean_data <- read_csv('clean_data.csv')
 
+# brief column cleaning
 clean_data$examiner_analysis <- clean_data$`Examiner's Analysis`
 clean_data$examiner_analysis <- fct_relevel(clean_data$examiner_analysis, c('Elimination', 'Inc-C', 'Inc-B', 'Inc-A', 'Identification'))
 ```
@@ -51,6 +53,7 @@ exam_summary <- clean_data %>%
 ```
 
 ```{r}
+# mated vs nonmated counts
 ggplot(clean_data, aes(x = M_NM)) + 
   geom_bar()
 
@@ -61,6 +64,7 @@ elim_sorted <- clean_data %>%
   arrange(desc(prop_elim)) %>% 
   pull(Gun_Q)
 
+# Visualize proportions of decisions made based on gun
 clean_data %>%
   filter(examiner_analysis %in% c("Elimination", "Inc-C", "Inc-B", "Inc-A", "Identification")) %>% 
   mutate(Gun_Q = factor(Gun_Q, levels = elim_sorted)) %>%
@@ -78,13 +82,15 @@ clean_data %>%
 
 # Graph pairs rather than guns. Separating into M and NM to cut the amount of pairs
 
+
+# Sorting mated pairs
 mated_sorted <- clean_data %>% 
   group_by(Pair) %>% 
   summarize(prop_id = mean(examiner_analysis == 'Identification', na.rm = TRUE)) %>% 
   arrange(desc(prop_id)) %>% 
   pull(Pair)
 
-# Mated pairs
+# graphing Mated pairs
 clean_data %>%
   filter(M_NM == "M") %>% 
   filter(examiner_analysis %in% c("Elimination", "Identification", "Inc-C", "Inc-B", "Inc-A")) %>% 
@@ -102,7 +108,7 @@ clean_data %>%
   scale_fill_manual(values=c("#F8766D", "#E8AF35", "#EBE41E", "#00BA38", "#2089F7"))
 
 
-
+# Sorting unmated pairs
 unmated_sorted <- clean_data %>% 
   group_by(Pair) %>% 
   summarize(prop_el = mean(examiner_analysis == 'Elimination', na.rm = TRUE)) %>% 
@@ -111,7 +117,7 @@ unmated_sorted <- clean_data %>%
 
 
 
-# Non mated pairs
+# graphing non mated pairs
 clean_data %>%
   filter(M_NM == "NM") %>% 
   filter(examiner_analysis %in% c("Elimination", "Identification", "Inc-C", "Inc-B", "Inc-A")) %>% 
@@ -131,7 +137,7 @@ clean_data %>%
 
 
 
-
+# Adding a 'correct' column for when examiners make the correct decision
 clean_data <- clean_data %>%
   mutate(correct = case_when(
     M_NM == "NM" & examiner_analysis == "Elimination" ~ 1,
@@ -139,7 +145,7 @@ clean_data <- clean_data %>%
     TRUE ~ 0
   ))
 
-
+# Graphing examiner correct decisions made
 clean_data %>%
   group_by(ExamID) %>%
   summarize(correct_rate = mean(correct, na.rm = TRUE)) %>%
