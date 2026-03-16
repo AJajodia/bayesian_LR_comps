@@ -8,6 +8,7 @@ library(tidyverse)
 library(rstan)
 library(rstanarm)
 library(brms)
+library(bayesplot)
 ```
 
 ```{r}
@@ -24,7 +25,7 @@ clean_data <- data %>% select(ExamID, `Examiner's Analysis`, Gun_1, Gun_Q, M_NM,
     )
   )
 write_csv(clean_data, "clean_data.csv")
-stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair) %>%
+stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair, Gun_Q) %>%
   mutate(`Examiner's Analysis` = case_when(
     `Examiner's Analysis` == "Inc-A" ~ 4,
     `Examiner's Analysis` == "Inc-B" ~ 3,
@@ -186,7 +187,7 @@ model_new <-"
 
 ```{r}
 ordinal_model <- brm(
-    response ~ M_NM,
+    response ~ M_NM + Gun_Q,
     data = stan_data,
     family = cumulative("probit"),
     chains = 4, iter = 2000, warmup = 1000,
@@ -194,10 +195,21 @@ ordinal_model <- brm(
 )
 ```
 ```{r}
-ordinal_model
+ordinal_model_interaction <- brm(
+    response ~ M_NM * Gun_Q,
+    data = stan_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+```
+
+```{r}
+ordinal_model_interaction
 ```
 ```{r}
-pp_ordinal <- pp_check(ordinal_model, ndraws = 50, type = "bars") +
+
+pp_ordinal <- pp_check(ordinal_model_interaction, ndraws = 50, type = "bars_grouped", group = "M_NM") +
   ggtitle("Ordinal Model: Posterior Predictive Check") +
   theme_minimal(base_family = "serif") +
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
@@ -206,7 +218,69 @@ pp_ordinal <- pp_check(ordinal_model, ndraws = 50, type = "bars") +
 ```{r}
 pp_ordinal
 ```
+
 ```{r}
-ordinal_model
+mcmc_dens_overlay(ordinal_model_interaction)
 ```
+```{r}
+chains <- as.data.frame(ordinal_model_interaction)
+```
+
+```{r}
+posterior_vals <- chains %>% rownames_to_column() %>%
+  mutate_at(vars(matches("b_M_NM:")), ~ .x + b_M_NM) %>%
+  pivot_longer(-rowname, names_to = "coefficient", values_to = "value") %>%
+  filter(str_detect(coefficient, "Gun_Q")) %>%
+  mutate(M_NM = str_detect(coefficient, "b_M_NM:")) %>%
+  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*"))
+posterior_vals
+```
+
+```{r}
+mated_data <- posterior_vals %>% filter(M_NM == TRUE)
+nonmated_data <- posterior_vals %>% filter(M_NM == FALSE)
+
+posterior_min <- min(posterior_vals$value)
+posterior_max <- max(posterior_vals$value)
+
+posterior_plotting_data <- posterior_vals %>% select(-coefficient) %>% 
+  pivot_wider(names_from = c(M_NM, Gun_Q), values_from = value) %>% 
+  select(-rowname) %>% summarize(across(everything(),
+                   ~ list(density(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "dens") %>%
+  mutate(dens = map(dens, ~ tibble(x = .x$x, y = .x$y))) %>%
+  unnest(dens) %>% separate(variable,c("Mated", "Gun_Q"), sep = "_")
+
+
+
+ggplot(posterior_plotting_data) +
+  geom_line(aes(x = x, y = y, group = interaction(Mated, Gun_Q), color = Mated))
+# %>% pivot_longer(everything(), names_to = c("M_NM", "Gun_Q"), names_pattern = "(.*)_(.*)")
+```
+
+```{r}
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.3)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.3))
+
+
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.1)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.1))
+
+ggplot(data = posterior_vals) +
+  geom_density(aes(x = value, color = M_NM))
+```
+```{r}
+posterior_vals %>% group_by(Gun_Q, M_NM) %>% summarize(mean = mean(value)) %>%
+  pivot_wider(id_cols = Gun_Q, names_from = M_NM, values_from = mean) %>%
+  ggplot() +
+  geom_point(aes(x = `FALSE`, y = `TRUE`))
+
+
+posterior_vals %>% pivot_wider(id_cols = c(rowname, Gun_Q), values_from = value, names_from = M_NM) %>%
+  ggplot() +
+  geom_density2d(aes(x = `TRUE`, y = `FALSE`))
+```
+
 
