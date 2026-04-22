@@ -1,0 +1,140 @@
+---
+title: "latent_sim"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(rstanarm)
+library(brms)
+library(bayesplot)
+```
+
+## Assumptions of our simulation:
+
+-   We have a number of $\beta$ based on latent difficulty associated with making a mated/nonmated firearm comparison
+-   We sample $\beta$ values from a normal distribution for each firearm based on their M/NM status and
+
+```{r}
+set.seed(1)
+
+n_guns <- 20
+prop_mated <- 0.5
+beta_offset <- 2
+beta_error <- rnorm(2* n_guns, 0, 1)
+
+guns_betas <- tibble("beta" = beta_offset + beta_error,
+                     "Gun_Q" = as.character(c(1:n_guns, 1:n_guns)),
+                     "M_NM" = c(rep(1, n_guns), rep(2, n_guns))
+                     ) %>%
+  mutate(beta = beta * ifelse(M_NM == 1, -1, 1))
+
+sim_data <- sample_n(guns_betas, size = 2000, replace = TRUE) %>% 
+  mutate(y_star = beta + rnorm(2000, 0, 2)) %>% 
+  mutate(
+    response = cut(y_star, breaks = c(-Inf, -1.5, -.5, .5, 1.5, Inf), labels = c(1, 2, 3, 4, 5)) %>% as.integer(),
+    M_NM
+    ) 
+ggplot(sim_data) +
+  geom_density(aes(x = y_star)) +
+  facet_grid(M_NM ~ Gun_Q)
+
+ggplot(sim_data) +
+  geom_bar(aes(x = response)) +
+  facet_grid(M_NM ~ Gun_Q)
+
+  
+
+```
+
+```{r}
+ordinal_model_interaction_sim <- brm(
+    response ~ M_NM * Gun_Q,
+    data = sim_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+
+```
+
+```{r}
+y_draws <- posterior_predict(ordinal_model_interaction_sim, ndraws = 100)
+groups <- interaction(sim_data$Gun_Q, sim_data$M_NM)
+y <- sim_data$response
+
+ppc_bars_grouped(
+  y = y, 
+  yrep = y_draws, 
+  group = groups
+)
+```
+
+```{r}
+
+chains_sim
+chains_sim <- as.data.frame(ordinal_model_interaction_sim)
+posterior_vals <- chains_sim %>% rownames_to_column() %>%
+  mutate_at(vars(matches("b_M_NM:")), ~ .x + b_M_NM) %>%
+  pivot_longer(-rowname, names_to = "coefficient", values_to = "value") %>%
+  filter(str_detect(coefficient, "Gun_Q")) %>%
+  mutate(M_NM = str_detect(coefficient, "b_M_NM:")) %>%
+  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*")) %>%
+  mutate(Gun_Q_mated = interaction(Gun_Q, M_NM))
+
+posterior_vals
+
+```
+
+```{r}
+
+mated_data <- posterior_vals %>% filter(M_NM == TRUE)
+nonmated_data <- posterior_vals %>% filter(M_NM == FALSE)
+
+posterior_min <- min(posterior_vals$value)
+posterior_max <- max(posterior_vals$value)
+
+posterior_plotting_data <- posterior_vals %>% select(-coefficient) %>% 
+  pivot_wider(names_from = c(M_NM, Gun_Q), values_from = value) %>% 
+  select(-rowname) %>% summarize(across(everything(),
+                   ~ list(density(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "dens") %>%
+  mutate(dens = map(dens, ~ tibble(x = .x$x, y = .x$y))) %>%
+  unnest(dens) %>% separate(variable,c("Mated", "Gun_Q"), sep = "_")
+
+
+
+ggplot(posterior_plotting_data) +
+  geom_line(aes(x = x, y = y, group = interaction(Mated, Gun_Q), color = Mated)) +
+  xlim(-50, 50)
+
+# ggplot(posterior_plotting_data) +
+#   geom_boxplot(aes())
+```
+
+```{r}
+
+
+ggplot(posterior_vals) +
+  geom_boxplot(aes(x = value, y = fct_reorder(Gun_Q_mated, value, .fun = median), color = M_NM))
+
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.3)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.3))
+
+
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.1)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.1))
+
+ggplot(data = posterior_vals) +
+  geom_density(aes(x = value, color = M_NM)) +
+  xlim(-25, 25)
+```
+
+```{r}
+
+```

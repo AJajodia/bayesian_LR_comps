@@ -1,6 +1,8 @@
 ---
 title: "proposal"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r}
@@ -39,150 +41,17 @@ stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair, Gun_Q) %>%
 
 ```
 
-```{r}
-model <-"
-  # Source - https://stackoverflow.com/a/53566101
-  # Posted by Nick DiQuattro
-  # Retrieved 2026-02-18, License - CC BY-SA 4.0
-
-  data {
-    real L;                     // Lower fixed thresholds
-    real<lower=L> U;            // Upper fixed threshold
-  
-    int<lower=2> J;             // Number of outcome levels
-  
-    int<lower=0> N;             // Data length
-  
-    int<lower=1,upper=J> y[N];  // Ordinal responses
-  }
-
-  transformed data {
-    real<lower=0> diff;         // difference between upper and lower fixed thresholds
-    int<lower=1> K;             // Number of thresholds
-  
-    K = J - 1;
-    diff = U - L;
-  }
-  
-  parameters {
-    simplex[K - 1] thresh_raw;      // raw thresholds
-    real mu; // latent mean
-    real<lower=0> sigma; // latent sd
-  }
-  
-  transformed parameters {
-    ordered[K] thresh;     // new thresholds with fixed first and last
-  
-    thresh[1] = L;
-    thresh[2:K] = L + diff * cumulative_sum(thresh_raw);
-    thresh[K] = U; // Overwrite last value to fix it
-  }
-
-  model{
-    vector[J] theta;                  // local parameter for ordinal categories
-  
-    //priors
-    mu ~ normal( (1+J)/2.0 , 1/(pow(J,2)) );
-    sigma ~ exponential(J*5);
-  
-    for (i in 2:K-2)
-      thresh[i] ~ normal(i + .05, 2);
-  
-    // likelihood statement
-    for(n in 1:N) {
-  
-      // probability of ordinal category definitions
-      theta[1] = normal_cdf( thresh[1] , mu, sigma );
-  
-      for (l in 2:K)
-        theta[l] = fmax(0, normal_cdf(thresh[l], mu, sigma ) - normal_cdf(thresh[l-1], mu, sigma));
-  
-      theta[J] = 1 - normal_cdf(thresh[K] , mu, sigma);
-  
-      y[n] ~ categorical(theta);
-    }
-}
-"
-
-model_new <-"
-  # Source - https://stackoverflow.com/a/53566101
-  # Posted by Nick DiQuattro
-  # Retrieved 2026-02-18, License - CC BY-SA 4.0
-
-  data {
-    real L;                     // Lower fixed thresholds
-    real<lower=L> U;            // Upper fixed threshold
-  
-    int<lower=2> J;             // Number of outcome levels
-  
-    int<lower=0> N;             // Data length
-  
-    int<lower=1,upper=J> y[N];  // Ordinal responses
-  }
-
-  transformed data {
-    real<lower=0> diff;         // difference between upper and lower fixed thresholds
-    int<lower=1> K;             // Number of thresholds
-  
-    K = J - 1;
-    diff = U - L;
-  }
-  
-  parameters {
-    simplex[K - 1] thresh_raw;      // raw thresholds
-    real mu; // latent mean
-    real<lower=0> sigma; // latent sd
-    real<lower=0> sigma_mode; // latent sd
-    real<lower=0> sigma_sd; // latent sd
-  }
-  
-  transformed parameters {
-    ordered[K] thresh;     // new thresholds with fixed first and last
-  
-    thresh[1] = L;
-    thresh[2:K] = L + diff * cumulative_sum(thresh_raw);
-    thresh[K] = U; // Overwrite last value to fix it
-  }
-
-  model{
-    vector[J] theta;                  // local parameter for ordinal categories
-    real sigma_shape; // latent sd
-    real sigma_rate; // latent sd
-  
-    //priors
-    
-    sigma_mode ~ gamma(3, 3);
-    sigma_sd ~ gamma(3, 3);
-    sigma_shape = 1 * sigma_mode * sigma_rate;
-    sigma_rate = (sigma_mode + sqrt(square(sigma_mode)) + 4 * square(sigma_sd))/(2 * square(sigma_sd));
-    
-    mu ~ normal( (1+J)/2.0 , 1/(pow(J,2)) );
-    sigma ~ gamma(sigma_shape, sigma_rate);
-    
-    for (i in 2:K-2)
-      thresh[i] ~ normal(i + .05, .25);
-  
-    // likelihood statement
-    for(n in 1:N) {
-  
-      // probability of ordinal category definitions
-      theta[1] = normal_cdf( thresh[1] , mu, sigma );
-  
-      for (l in 2:K)
-        theta[l] = fmax(0, normal_cdf(thresh[l], mu, sigma ) - normal_cdf(thresh[l-1], mu, sigma));
-  
-      theta[J] = 1 - normal_cdf(thresh[K] , mu, sigma);
-  
-      y[n] ~ categorical(theta);
-    }
-}
-"
-```
 
 ```{r}
 # model_fit <- stan(model_code = model, data = list(L = 0, U = 5, J = 3, N = 4258, y = stan_data$`Examiner's Analysis`),
 #                   iter = 5000*2, chains = 4
 #                   )
+
+
+ggplot(stan_data) +
+  geom_bar(aes(x = response)) +
+  facet_grid(M_NM ~ Gun_Q)
+
 ```
 
 ```{r}
@@ -207,16 +76,21 @@ ordinal_model_interaction <- brm(
 ```{r}
 ordinal_model_interaction
 ```
-```{r}
 
-pp_ordinal <- pp_check(ordinal_model_interaction, ndraws = 50, type = "bars_grouped", group = "M_NM") +
-  ggtitle("Ordinal Model: Posterior Predictive Check") +
-  theme_minimal(base_family = "serif") +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```{r}
+y_draws <- posterior_predict(ordinal_model_interaction , ndraws = 100)
+groups <- interaction(stan_data$Gun_Q, stan_data$M_NM)
+y <- stan_data$response
+
+ppc_bars_grouped(
+  y = y, 
+  yrep = y_draws, 
+  group = groups
+)
 ```
 
 ```{r}
-pp_ordinal
+stan_data
 ```
 
 ```{r}
@@ -224,6 +98,7 @@ mcmc_dens_overlay(ordinal_model_interaction)
 ```
 ```{r}
 chains <- as.data.frame(ordinal_model_interaction)
+chains
 ```
 
 ```{r}
