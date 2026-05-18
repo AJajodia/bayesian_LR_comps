@@ -1,0 +1,365 @@
+---
+title: "modeling"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(rstanarm)
+library(brms)
+library(bayesplot)
+library(coda)
+library(here)
+library(patchwork)
+```
+
+```{r}
+data <- read_csv(here("data/cartridge_bullets_2022_cartridges.csv")) %>% filter(AnalType == "New")
+```
+
+```{r}
+clean_data <- data %>% select(ExamID, `Examiner's Analysis`, Gun_1, Gun_Q, M_NM, ExamID_2, Pair) %>%
+  mutate(
+    `Examiner's Analysis` = case_when(
+      str_detect(`Examiner's Analysis`, "ID") ~ "Identification",
+      str_detect(`Examiner's Analysis`, "Elim") ~ "Elimination",
+      .default = `Examiner's Analysis`
+    )
+  )
+write_csv(clean_data, "clean_data.csv")
+stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair, Gun_Q) %>%
+  mutate(`Examiner's Analysis` = case_when(
+    `Examiner's Analysis` == "Inc-A" ~ 4,
+    `Examiner's Analysis` == "Inc-B" ~ 3,
+    `Examiner's Analysis` == "Inc-C" ~ 2,
+    `Examiner's Analysis` == "Elimination" ~ 1,
+    `Examiner's Analysis` == "Identification" ~ 5
+  )) %>% mutate(`M_NM` = case_when(
+    M_NM == "M" ~ 2,
+    M_NM == "NM" ~ 1
+  )) %>% mutate(response = `Examiner's Analysis`, `Examiner's Analysis` = NULL) %>% drop_na()
+
+```
+
+
+```{r}
+# model_fit <- stan(model_code = model, data = list(L = 0, U = 5, J = 3, N = 4258, y = stan_data$`Examiner's Analysis`),
+#                   iter = 5000*2, chains = 4
+#                   )
+
+
+ggplot(stan_data) +
+  geom_bar(aes(x = response)) +
+  facet_grid(M_NM ~ Gun_Q)
+
+```
+
+```{r}
+ordinal_model <- brm(
+    response ~ M_NM + Gun_Q,
+    data = stan_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+```
+```{r}
+ordinal_model_interaction <- brm(
+    response ~ M_NM * Gun_Q,
+    data = stan_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+```
+
+```{r}
+ordinal_model_interaction
+```
+
+```{r}
+y_draws <- posterior_predict(ordinal_model_interaction , ndraws = 100)
+groups <- interaction(stan_data$Gun_Q, stan_data$M_NM)
+y <- stan_data$response
+
+ppc_bars_grouped(
+  y = y, 
+  yrep = y_draws, 
+  group = groups
+)
+```
+
+```{r}
+stan_data
+```
+
+```{r}
+mcmc_dens_overlay(ordinal_model_interaction)
+
+mcmc_trace(ordinal_model_interaction)
+
+mcmc_acf(ordinal_model_interaction)
+
+acf_table <- autocorr(chains, lags = c(0, 1, 5, 10, 50), relative=TRUE)
+
+# Display the table
+print(acf_table)
+```
+
+```{r}
+chains <- as.data.frame(ordinal_model_interaction)
+chains
+```
+
+```{r}
+posterior_vals <- chains %>% rownames_to_column() %>%
+  mutate_at(vars(matches("b_M_NM:")), ~ .x + b_M_NM) %>%
+  pivot_longer(-rowname, names_to = "coefficient", values_to = "value") %>%
+  filter(str_detect(coefficient, "Gun_Q")) %>%
+  mutate(M_NM = str_detect(coefficient, "b_M_NM:")) %>%
+  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*"))
+posterior_vals
+```
+
+```{r}
+mated_data <- posterior_vals %>% filter(M_NM == TRUE)
+nonmated_data <- posterior_vals %>% filter(M_NM == FALSE)
+
+posterior_min <- min(posterior_vals$value)
+posterior_max <- max(posterior_vals$value)
+
+posterior_plotting_data <- posterior_vals %>% select(-coefficient) %>% 
+  pivot_wider(names_from = c(M_NM, Gun_Q), values_from = value) %>% 
+  select(-rowname) %>% summarize(across(everything(),
+                   ~ list(density(., 
+                                  from = posterior_min, 
+                                  to = posterior_max, 
+                                  n = 4096
+                                    )))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "dens") %>%
+  mutate(dens = map(dens, ~ tibble(x = .x$x, y = .x$y))) %>%
+  unnest(dens) %>% separate(variable,c("Mated", "Gun_Q"), sep = "_")
+
+
+
+ggplot(posterior_plotting_data) +
+  geom_line(aes(x = x, y = y, group = interaction(Mated, Gun_Q), color = Mated))
+# %>% pivot_longer(everything(), names_to = c("M_NM", "Gun_Q"), names_pattern = "(.*)_(.*)")
+```
+
+```{r}
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.3)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.3)) +
+  theme_bw(base_size = 18) +
+  labs(x = "Latent Dimension", y = "Density")
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.3)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.3)) +
+  theme_bw(base_size = 18) +
+  labs(x = "Latent Dimension", y = "Density") +
+  scale_y_log10()
+
+ggplot(data = posterior_vals) +
+  geom_density(aes(x = value, color = M_NM))
+```
+
+```{r}
+posterior_vals %>% group_by(Gun_Q, M_NM) %>% summarize(mean = mean(value)) %>%
+  pivot_wider(id_cols = Gun_Q, names_from = M_NM, values_from = mean) %>%
+  ggplot() +
+  geom_point(aes(x = `FALSE`, y = `TRUE`))
+
+
+posterior_vals %>% pivot_wider(id_cols = c(rowname, Gun_Q), values_from = value, names_from = M_NM) %>%
+  ggplot() +
+  geom_density2d(aes(x = `TRUE`, y = `FALSE`)) +
+  theme_bw() +
+  labs(
+    x = expression("Mated "* beta),
+    y = expression("Nonmated "* beta),
+    )
+
+
+posterior_vals %>% 
+  pivot_wider(id_cols = c(rowname, Gun_Q), values_from = value, names_from = M_NM) %>% mutate(lr = `TRUE`/`FALSE`) %>%
+  ggplot() +
+  geom_smooth(aes(x = `TRUE`, y = lr)) +
+  geom_point(aes(x = `TRUE`, y = lr), size = 0.1, alpha = 0.01) +
+  scale_y_log10(limits = c(0.01, 100)) +
+  theme_bw() +
+  xlim(0, 5) +
+  labs(x = "Latent Dimension", y = "Likelihood Ratio")
+    
+
+```
+
+
+
+```{r}
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  ) %>% pivot_wider(names_from = Mated, values_from = mu) %>%
+  mutate(lr = `TRUE`/`FALSE`) %>% ggplot() +
+  geom_smooth(aes(x = x, y = lr)) +
+  scale_x_log10()
+
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  )%>%
+  ggplot() +
+  geom_line(aes(x = x, y = mu, color = Mated))
+
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  ) %>% pivot_wider(names_from = Mated, values_from = mu) %>%
+  mutate(lr = `TRUE`/`FALSE`) %>% ungroup() %>% 
+  summarize(lower_lr = quantile(lr, 0.025),
+            upper_lr = quantile(lr, 0.975), median_lr = median(lr))
+```
+
+```{r}
+# method 1: sampling proportionately from Busey method
+mated <- posterior_plotting_data %>% filter(Mated == TRUE) %>%
+  group_by(x) %>% summarize(y = mean(y))
+nonmated <- posterior_plotting_data %>% filter(Mated == FALSE) %>%
+  group_by(x) %>% summarize(y = mean(y))
+
+posterior_plotting_data %>% group_by(x, Mated) %>% 
+  summarize(sum = sum(y)) %>%
+  ggplot() +
+  geom_line(aes(x = x, y = sum, color = Mated))
+
+lr_sample_1 <- mated %>% rename(y_mated = y) %>% mutate(
+  y_nonmated = nonmated$y,
+  lr = y_mated/y_nonmated
+  ) %>% filter(y_nonmated != 0) %>% slice_sample(n = 10000, weight_by = y_mated, replace = TRUE)
+
+ggplot(lr_sample_1) +
+  geom_smooth(aes(x = x, y = lr)) +
+  scale_y_log10(labels = scales::label_log(base = 10)) +
+  labs(x = "Latent Value", y = "Likelihood Ratio") +
+  theme_bw(base_size = 18) +
+  xlim(0, max(lr_sample_1$x))
+
+ggplot(lr_sample_1) +
+  geom_density(aes(x = lr)) +
+  scale_x_log10() +
+  theme_bw(base_size = 18) +
+  labs(x = "Likelihood Ratio", y = "Density")
+
+lr_sample_1 %>%
+  summarize(lower_lr = quantile(lr, 0.1),
+            upper_lr = quantile(lr, 0.9), 
+            median_lr = median(lr),
+            mean_lr = mean(lr),
+            sd_lr = sd(lr)
+            )
+
+
+default_prior <- lr_sample_1 %>% mutate(probability = lr/(lr + 1)) %>% 
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  labs(x = "Probability", y = "Density") +
+  theme_bw(base_size = 18)
+
+normal_prior <- lr_sample_1 %>% mutate(prior = 1/(rnorm(nrow(lr_sample_1), 3, 1) + 1), 
+                       post = prior * lr, 
+                       probability = post/(post + 1)) %>%
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  xlim(0, 1)+
+  theme_bw(base_size = 18) +
+  labs(x = "Probability", y = "Density")
+
+unif_prior <- lr_sample_1 %>% mutate(prior = 1/runif(nrow(lr_sample_1), 2, 4), 
+                       post = prior * lr, 
+                       probability = post/(post + 1)) %>%
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  xlim(0, 1)+
+  theme_bw(base_size = 18) +
+  labs(x = "Probability", y = "Density")
+
+
+
+pois_prior <- lr_sample_1 %>% mutate(prior = 1/rpois(nrow(lr_sample_1), 3), 
+                       post = prior * lr, 
+                       probability = post/(post + 1)) %>%
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  xlim(0, 1)+
+  theme_bw(base_size = 18) +
+  labs(x = "Probability", y = "Density")
+
+
+default_prior + normal_prior + unif_prior + pois_prior + plot_layout(ncol = 2, nrow = 2)
+```
+
+```{r}
+# method 2: sampling from the 2D normal (chains)
+
+lr_sample_2 <- posterior_vals %>% 
+  pivot_wider(id_cols = c(rowname, Gun_Q), values_from = value, names_from = M_NM) %>%
+  slice_sample(n = 100000, replace = TRUE) %>%
+  mutate(`TRUE` = scale(`TRUE`), `FALSE` = scale(`FALSE`)) %>%
+  mutate(lr = pnorm(`TRUE`)/pnorm(`FALSE`))
+
+ggplot(lr_sample_2) +
+  geom_histogram(aes(x = lr)) +
+  scale_x_log10() +
+  theme_bw()+
+    labs(x = "Likelihood Ratio", y = "Count")
+
+lr_sample_2 %>%
+  summarize(lower_lr = quantile(lr, 0.05),
+            upper_lr = quantile(lr, 0.95), median = median(lr))
+
+
+
+lr_sample_2 %>% mutate(probability = lr/(lr + 1)) %>% 
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  labs(x = "Probability", y = "Density") +
+  theme_bw(base_size = 18)
+
+lr_sample_2 %>% mutate(prior = 1/rnorm(nrow(lr_sample_2), 3, 1), 
+                       post = prior * lr, 
+                       probability = post/(post + 1)) %>%
+  ggplot() +
+  geom_density(aes(x = probability)) +
+  xlim(0, 1)+
+  theme_bw() +
+  labs(x = "Probability", y = "Density")
+
+
+```
+
+
+```{r}
+# Method 3: Cauchy approximation
+
+
+lr_sample_2_stats <- posterior_vals %>% group_by(M_NM) %>%
+  summarize(median = median(value), scale = (quantile(value, 0.75) - quantile(value, 0.25))/2)
+
+posterior_vals %>%
+  ggplot() +
+  geom_density(aes(x = value, color = M_NM)) +
+  stat_function(fun = dcauchy, 
+                args = list(location = lr_sample_2_stats$median[1], scale = lr_sample_2_stats$scale[1]),
+                color = "red", size = 1) +
+  stat_function(fun = dcauchy, 
+                args = list(location = lr_sample_2_stats$median[2], scale = lr_sample_2_stats$scale[2]),
+                color = "blue", size = 1)
+
+
+```
+
+
