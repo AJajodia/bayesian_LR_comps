@@ -1,0 +1,286 @@
+---
+title: "proposal"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(rstan)
+library(rstanarm)
+library(brms)
+library(bayesplot)
+```
+
+```{r}
+data <- read_csv("cartridge_bullets_2022_cartridges.csv") %>% filter(AnalType == "New")
+```
+
+```{r}
+clean_data <- data %>% select(ExamID, `Examiner's Analysis`, Gun_1, Gun_Q, M_NM, ExamID_2, Pair) %>%
+  mutate(
+    `Examiner's Analysis` = case_when(
+      str_detect(`Examiner's Analysis`, "ID") ~ "Identification",
+      str_detect(`Examiner's Analysis`, "Elim") ~ "Elimination",
+      .default = `Examiner's Analysis`
+    )
+  )
+write_csv(clean_data, "clean_data.csv")
+stan_data <- clean_data %>% select(`Examiner's Analysis`, M_NM, Pair, Gun_Q) %>%
+  mutate(`Examiner's Analysis` = case_when(
+    `Examiner's Analysis` == "Inc-A" ~ 4,
+    `Examiner's Analysis` == "Inc-B" ~ 3,
+    `Examiner's Analysis` == "Inc-C" ~ 2,
+    `Examiner's Analysis` == "Elimination" ~ 1,
+    `Examiner's Analysis` == "Identification" ~ 5
+  )) %>% mutate(`M_NM` = case_when(
+    M_NM == "M" ~ 2,
+    M_NM == "NM" ~ 1
+  )) %>% mutate(response = `Examiner's Analysis`, `Examiner's Analysis` = NULL) %>% drop_na()
+
+```
+
+```{r}
+model <-"
+  # Source - https://stackoverflow.com/a/53566101
+  # Posted by Nick DiQuattro
+  # Retrieved 2026-02-18, License - CC BY-SA 4.0
+
+  data {
+    real L;                     // Lower fixed thresholds
+    real<lower=L> U;            // Upper fixed threshold
+  
+    int<lower=2> J;             // Number of outcome levels
+  
+    int<lower=0> N;             // Data length
+  
+    int<lower=1,upper=J> y[N];  // Ordinal responses
+  }
+
+  transformed data {
+    real<lower=0> diff;         // difference between upper and lower fixed thresholds
+    int<lower=1> K;             // Number of thresholds
+  
+    K = J - 1;
+    diff = U - L;
+  }
+  
+  parameters {
+    simplex[K - 1] thresh_raw;      // raw thresholds
+    real mu; // latent mean
+    real<lower=0> sigma; // latent sd
+  }
+  
+  transformed parameters {
+    ordered[K] thresh;     // new thresholds with fixed first and last
+  
+    thresh[1] = L;
+    thresh[2:K] = L + diff * cumulative_sum(thresh_raw);
+    thresh[K] = U; // Overwrite last value to fix it
+  }
+
+  model{
+    vector[J] theta;                  // local parameter for ordinal categories
+  
+    //priors
+    mu ~ normal( (1+J)/2.0 , 1/(pow(J,2)) );
+    sigma ~ exponential(J*5);
+  
+    for (i in 2:K-2)
+      thresh[i] ~ normal(i + .05, 2);
+  
+    // likelihood statement
+    for(n in 1:N) {
+  
+      // probability of ordinal category definitions
+      theta[1] = normal_cdf( thresh[1] , mu, sigma );
+  
+      for (l in 2:K)
+        theta[l] = fmax(0, normal_cdf(thresh[l], mu, sigma ) - normal_cdf(thresh[l-1], mu, sigma));
+  
+      theta[J] = 1 - normal_cdf(thresh[K] , mu, sigma);
+  
+      y[n] ~ categorical(theta);
+    }
+}
+"
+
+model_new <-"
+  # Source - https://stackoverflow.com/a/53566101
+  # Posted by Nick DiQuattro
+  # Retrieved 2026-02-18, License - CC BY-SA 4.0
+
+  data {
+    real L;                     // Lower fixed thresholds
+    real<lower=L> U;            // Upper fixed threshold
+  
+    int<lower=2> J;             // Number of outcome levels
+  
+    int<lower=0> N;             // Data length
+  
+    int<lower=1,upper=J> y[N];  // Ordinal responses
+  }
+
+  transformed data {
+    real<lower=0> diff;         // difference between upper and lower fixed thresholds
+    int<lower=1> K;             // Number of thresholds
+  
+    K = J - 1;
+    diff = U - L;
+  }
+  
+  parameters {
+    simplex[K - 1] thresh_raw;      // raw thresholds
+    real mu; // latent mean
+    real<lower=0> sigma; // latent sd
+    real<lower=0> sigma_mode; // latent sd
+    real<lower=0> sigma_sd; // latent sd
+  }
+  
+  transformed parameters {
+    ordered[K] thresh;     // new thresholds with fixed first and last
+  
+    thresh[1] = L;
+    thresh[2:K] = L + diff * cumulative_sum(thresh_raw);
+    thresh[K] = U; // Overwrite last value to fix it
+  }
+
+  model{
+    vector[J] theta;                  // local parameter for ordinal categories
+    real sigma_shape; // latent sd
+    real sigma_rate; // latent sd
+  
+    //priors
+    
+    sigma_mode ~ gamma(3, 3);
+    sigma_sd ~ gamma(3, 3);
+    sigma_shape = 1 * sigma_mode * sigma_rate;
+    sigma_rate = (sigma_mode + sqrt(square(sigma_mode)) + 4 * square(sigma_sd))/(2 * square(sigma_sd));
+    
+    mu ~ normal( (1+J)/2.0 , 1/(pow(J,2)) );
+    sigma ~ gamma(sigma_shape, sigma_rate);
+    
+    for (i in 2:K-2)
+      thresh[i] ~ normal(i + .05, .25);
+  
+    // likelihood statement
+    for(n in 1:N) {
+  
+      // probability of ordinal category definitions
+      theta[1] = normal_cdf( thresh[1] , mu, sigma );
+  
+      for (l in 2:K)
+        theta[l] = fmax(0, normal_cdf(thresh[l], mu, sigma ) - normal_cdf(thresh[l-1], mu, sigma));
+  
+      theta[J] = 1 - normal_cdf(thresh[K] , mu, sigma);
+  
+      y[n] ~ categorical(theta);
+    }
+}
+"
+```
+
+```{r}
+# model_fit <- stan(model_code = model, data = list(L = 0, U = 5, J = 3, N = 4258, y = stan_data$`Examiner's Analysis`),
+#                   iter = 5000*2, chains = 4
+#                   )
+```
+
+```{r}
+ordinal_model <- brm(
+    response ~ M_NM + Gun_Q,
+    data = stan_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+```
+```{r}
+ordinal_model_interaction <- brm(
+    response ~ M_NM * Gun_Q,
+    data = stan_data,
+    family = cumulative("probit"),
+    chains = 4, iter = 2000, warmup = 1000,
+    cores = 4, seed = 1138, refresh = 0
+)
+```
+
+```{r}
+ordinal_model_interaction
+```
+```{r}
+
+pp_ordinal <- pp_check(ordinal_model_interaction, ndraws = 50, type = "bars_grouped", group = "M_NM") +
+  ggtitle("Ordinal Model: Posterior Predictive Check") +
+  theme_minimal(base_family = "serif") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+```{r}
+pp_ordinal
+```
+
+```{r}
+mcmc_dens_overlay(ordinal_model_interaction)
+```
+```{r}
+chains <- as.data.frame(ordinal_model_interaction)
+```
+
+```{r}
+posterior_vals <- chains %>% rownames_to_column() %>%
+  mutate_at(vars(matches("b_M_NM:")), ~ .x + b_M_NM) %>%
+  pivot_longer(-rowname, names_to = "coefficient", values_to = "value") %>%
+  filter(str_detect(coefficient, "Gun_Q")) %>%
+  mutate(M_NM = str_detect(coefficient, "b_M_NM:")) %>%
+  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*"))
+posterior_vals
+```
+
+```{r}
+mated_data <- posterior_vals %>% filter(M_NM == TRUE)
+nonmated_data <- posterior_vals %>% filter(M_NM == FALSE)
+
+posterior_min <- min(posterior_vals$value)
+posterior_max <- max(posterior_vals$value)
+
+posterior_plotting_data <- posterior_vals %>% select(-coefficient) %>% 
+  pivot_wider(names_from = c(M_NM, Gun_Q), values_from = value) %>% 
+  select(-rowname) %>% summarize(across(everything(),
+                   ~ list(density(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "dens") %>%
+  mutate(dens = map(dens, ~ tibble(x = .x$x, y = .x$y))) %>%
+  unnest(dens) %>% separate(variable,c("Mated", "Gun_Q"), sep = "_")
+
+
+
+ggplot(posterior_plotting_data) +
+  geom_line(aes(x = x, y = y, group = interaction(Mated, Gun_Q), color = Mated))
+# %>% pivot_longer(everything(), names_to = c("M_NM", "Gun_Q"), names_pattern = "(.*)_(.*)")
+```
+
+```{r}
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.3)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.3))
+
+
+ggplot() +
+  geom_density(aes(x = value, group = Gun_Q), data = mated_data, color = alpha("blue", 0.1)) +
+  geom_density(aes(x = value, group = Gun_Q), data = nonmated_data, color = alpha("red", 0.1))
+
+ggplot(data = posterior_vals) +
+  geom_density(aes(x = value, color = M_NM))
+```
+```{r}
+posterior_vals %>% group_by(Gun_Q, M_NM) %>% summarize(mean = mean(value)) %>%
+  pivot_wider(id_cols = Gun_Q, names_from = M_NM, values_from = mean) %>%
+  ggplot() +
+  geom_point(aes(x = `FALSE`, y = `TRUE`))
+
+
+posterior_vals %>% pivot_wider(id_cols = c(rowname, Gun_Q), values_from = value, names_from = M_NM) %>%
+  ggplot() +
+  geom_density2d(aes(x = `TRUE`, y = `FALSE`))
+```
+
+

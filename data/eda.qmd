@@ -1,0 +1,173 @@
+---
+title: "EDA"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(vcd)
+library(ggthemes)
+library(forcats)
+```
+
+```{r}
+# Loading in the data
+clean_data <- read_csv('clean_data.csv')
+
+# brief column cleaning
+clean_data$examiner_analysis <- clean_data$`Examiner's Analysis`
+clean_data$examiner_analysis <- fct_relevel(clean_data$examiner_analysis, c('Elimination', 'Inc-C', 'Inc-B', 'Inc-A', 'Identification'))
+```
+
+
+
+```{r}
+# Per-pair counts of decisions
+pair_summary <- clean_data %>%
+  count(Pair, `Examiner's Analysis`) %>%
+  pivot_wider(
+    names_from = `Examiner's Analysis`,
+    values_from = n,
+    values_fill = 0
+  )
+```
+
+```{r}
+# Counts of pair observations and individual gun observations
+pair_counts <- clean_data %>% group_by(Pair) %>% summarize(n = n())
+
+gun_counts <- clean_data %>% group_by(Gun_Q) %>% summarize(n = n())
+```
+
+
+```{r}
+# Per-examiner counts of decisions made
+exam_summary <- clean_data %>%
+  count(ExamID, `Examiner's Analysis`) %>%
+  pivot_wider(
+    names_from = `Examiner's Analysis`,
+    values_from = n,
+    values_fill = 0
+  )
+```
+
+```{r}
+# Jitter plot of examiner decisions 
+ggplot(clean_data %>%
+  filter(!examiner_analysis %in% c(
+    "X-Did not provide answer",
+    "Unsuitable-Lack of sufficent marks on QUESTIONED sample",
+     "Unsuitable-Lack of sufficent marks on QUESTIONED and KNOWN samples",
+    "Unsuitable-Lack of sufficent marks on KNOWN samples",
+    "Inc",
+    "Inc-B and Inc-C",
+     "Inc-A and Inc-C"
+  )), aes(x = M_NM, y = examiner_analysis)) +
+  geom_jitter()
+
+
+
+# mated vs nonmated counts
+ggplot(clean_data, aes(x = M_NM)) + 
+  geom_bar()
+
+# Sort proportions based on elimination rates
+elim_sorted <- clean_data %>% 
+  group_by(Gun_Q) %>% 
+  summarize(prop_elim = mean(`Examiner's Analysis` == "Elimination", na.rm = TRUE)) %>% 
+  arrange(desc(prop_elim)) %>% 
+  pull(Gun_Q)
+
+# Visualize proportions of decisions made based on gun
+clean_data %>%
+  filter(examiner_analysis %in% c("Elimination", "Inc-C", "Inc-B", "Inc-A", "Identification")) %>% 
+  mutate(Gun_Q = factor(Gun_Q, levels = elim_sorted)) %>%
+  ggplot(aes(x = Gun_Q, fill = examiner_analysis)) +
+  geom_bar(position = "fill") +
+  labs(
+    x = "Gun_Q",
+    y = "Proportion",
+    fill = "Examiner's Analysis",
+    title = "Distribution of Examiner Decisions by Gun, sorted by Elimination"
+  ) + 
+  theme_clean() + 
+    scale_fill_manual(values=c("#F8766D", "#E8AF35", "#EBE41E", "#00BA38", "#2089F7"))
+
+
+# Graph pairs rather than guns. Separating into M and NM to cut the amount of pairs
+
+
+# Sorting mated pairs
+mated_sorted <- clean_data %>% 
+  group_by(Pair) %>% 
+  summarize(prop_id = mean(examiner_analysis == 'Identification', na.rm = TRUE)) %>% 
+  arrange(desc(prop_id)) %>% 
+  pull(Pair)
+
+# graphing Mated pairs
+clean_data %>%
+  filter(M_NM == "M") %>% 
+  filter(examiner_analysis %in% c("Elimination", "Identification", "Inc-C", "Inc-B", "Inc-A")) %>% 
+  mutate(Pair = factor(Pair, levels = mated_sorted)) %>% 
+  ggplot(aes(x = Pair, fill = examiner_analysis)) +
+  geom_bar(position = "fill") +
+  labs(
+    x = "Pair",
+    y = "Proportion",
+    fill = "Examiner's Analysis",
+    title = "Distribution of Examiner Decisions for Mated Pairs"
+  ) + 
+  theme_clean() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 10)) + 
+  scale_fill_manual(values=c("#F8766D", "#E8AF35", "#EBE41E", "#00BA38", "#2089F7"))
+
+
+# Sorting unmated pairs
+unmated_sorted <- clean_data %>% 
+  group_by(Pair) %>% 
+  summarize(prop_el = mean(examiner_analysis == 'Elimination', na.rm = TRUE)) %>% 
+  arrange(desc(prop_el)) %>% 
+  pull(Pair)
+
+
+
+# graphing non mated pairs
+clean_data %>%
+  filter(M_NM == "NM") %>% 
+  filter(examiner_analysis %in% c("Elimination", "Identification", "Inc-C", "Inc-B", "Inc-A")) %>% 
+  mutate(Pair = factor(Pair, levels = unmated_sorted)) %>% 
+  ggplot(aes(x = Pair, fill = examiner_analysis)) +
+  geom_bar(position = "fill") +
+  labs(
+    x = "Pair",
+    y = "Proportion",
+    fill = "Examiner's Analysis",
+    title = "Distribution of Examiner Decisions for Unmated Pairs"
+  ) + 
+  theme_clean() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 5))+ 
+  scale_fill_manual(values=c("#F8766D", "#E8AF35", "#EBE41E", "#00BA38", "#2089F7"))
+
+
+
+
+# Adding a 'correct' column for when examiners make the correct decision
+clean_data <- clean_data %>%
+  mutate(correct = case_when(
+    M_NM == "NM" & examiner_analysis == "Elimination" ~ 1,
+    M_NM == "M" & examiner_analysis == "Identification" ~ 1,
+    TRUE ~ 0
+  ))
+
+# Graphing examiner correct decisions made
+clean_data %>%
+  group_by(ExamID) %>%
+  summarize(correct_rate = mean(correct, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(factor(ExamID), correct_rate), y = correct_rate)) +
+  geom_bar(stat = "identity", fill = "#2089F7", color = 'black') +
+  labs(x = "Examiner ID", y = "Correct Decision Rate", title = "Examiners ordered by Correct Decision rates") +
+  theme_clean() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 7))
+```
+
