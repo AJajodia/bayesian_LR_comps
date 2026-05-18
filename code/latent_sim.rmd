@@ -82,8 +82,7 @@ posterior_vals <- chains_sim %>% rownames_to_column() %>%
   pivot_longer(-rowname, names_to = "coefficient", values_to = "value") %>%
   filter(str_detect(coefficient, "Gun_Q")) %>%
   mutate(M_NM = str_detect(coefficient, "b_M_NM:")) %>%
-  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*")) %>%
-  mutate(Gun_Q_mated = interaction(Gun_Q, M_NM))
+  mutate(Gun_Q = str_extract(coefficient, "(?<=Gun_Q)[:alnum:]*"))
 
 posterior_vals
 
@@ -100,12 +99,14 @@ posterior_max <- max(posterior_vals$value)
 posterior_plotting_data <- posterior_vals %>% select(-coefficient) %>% 
   pivot_wider(names_from = c(M_NM, Gun_Q), values_from = value) %>% 
   select(-rowname) %>% summarize(across(everything(),
-                   ~ list(density(.)))) %>%
+                   ~ list(density(., 
+                                  from = posterior_min, 
+                                  to = posterior_max, 
+                                  n = 4096
+                                    )))) %>%
   pivot_longer(everything(), names_to = "variable", values_to = "dens") %>%
   mutate(dens = map(dens, ~ tibble(x = .x$x, y = .x$y))) %>%
   unnest(dens) %>% separate(variable,c("Mated", "Gun_Q"), sep = "_")
-
-
 
 ggplot(posterior_plotting_data) +
   geom_line(aes(x = x, y = y, group = interaction(Mated, Gun_Q), color = Mated)) +
@@ -132,9 +133,38 @@ ggplot() +
 
 ggplot(data = posterior_vals) +
   geom_density(aes(x = value, color = M_NM)) +
-  xlim(-25, 25)
+  xlim(-5, 5)
 ```
 
 ```{r}
+ggplot(posterior_plotting_data) +
+  geom_line(aes(x = x, y = y))
+
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  ) %>%
+  ggplot() +
+    geom_line(aes(x = x, y = mu, color = Mated))
+
+
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  ) %>% pivot_wider(names_from = Mated, values_from = mu) %>%
+  mutate(lr = `TRUE`/`FALSE`) %>% ungroup() %>% 
+  filter(lr > 0.1) %>%
+  summarize(lower_lr = quantile(lr, 0.025),
+            upper_lr = quantile(lr, 0.975), mean_lr = mean(lr))
+
+
+posterior_plotting_data %>% group_by(x, Mated) %>%
+  summarize(
+    mu = mean(y)
+  ) %>% pivot_wider(names_from = Mated, values_from = mu) %>%
+  mutate(lr = `TRUE`/`FALSE`) %>% ungroup() %>% 
+  ggplot() +
+  geom_histogram(aes(x =  lr))
+
 
 ```

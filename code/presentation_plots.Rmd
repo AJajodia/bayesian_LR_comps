@@ -1,0 +1,49 @@
+---
+title: "presentation_plots"
+output: html_document
+---
+
+```{r}
+ggplot(data = data.frame(x = c(-20, 20)), aes(x = x)) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 5, sd = 3), color = "blue") +
+  stat_function(fun = dnorm, 
+                args = list(mean = -5, sd = 3), color = "red") +
+  labs(x = "Latent Dimension", y = "Density") +
+  theme_bw(base_size = 18)
+
+example_decision <- tibble(decision = sample(c("Exclusion", "Inc-A", "Inc-B", "Inc-C", "Inconclusive"), size = 1000, prob = c(.3, .25, .25, .15, .05), replace = TRUE), value = 1)
+
+example_decision_cdf <- example_decision %>% group_by(decision) %>%
+  summarize(
+    proportion = sum(value)/sum(example_decision$value),
+  ) %>% mutate(cdf = cumsum(proportion), right = qnorm(cdf, 3, 4), left = lag(right, 1))
+
+ggplot(data = data.frame(x = c(-10, 15)), aes(x = x)) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4)) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4),
+                geom = "area", fill = "#F8766D", 
+                xlim = c(-11, example_decision_cdf$right[1])) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4),
+                geom = "area", fill = "#A3A500", xlim = c(example_decision_cdf$left[2], example_decision_cdf$right[2])) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4),
+                geom = "area", fill = "#00BF7D", xlim = c(example_decision_cdf$left[3], example_decision_cdf$right[3])) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4),
+                geom = "area", fill = "#00B0F6", xlim = c(example_decision_cdf$left[4], example_decision_cdf$right[4])) +
+  stat_function(fun = dnorm, 
+                args = list(mean = 3, sd = 4),
+                geom = "area", fill = "#E76BF3", xlim = c(example_decision_cdf$left[5], 16)) +
+  theme_bw(base_size = 18) +
+  labs(x = "Latent Value", y = "Density")
+
+ggplot(example_decision_cdf) +
+  geom_col(aes(x = decision, y = proportion, fill = decision)) +
+  theme_bw(base_size = 18) +
+  labs(x = "Latent Value", y = "Density", fill = "Decision")
+```
+
